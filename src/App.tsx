@@ -13,7 +13,8 @@ import {
 import { BaseMealScreen } from './screens/BaseMealScreen'
 import { CalendarScreen } from './screens/CalendarScreen'
 import { ProteinSelectScreen } from './screens/ProteinSelectScreen'
-import { RecipeResultsScreen } from './screens/RecipeResultsScreen'
+import { RecipeDetailScreen } from './screens/RecipeDetailScreen'
+import { RecipeListScreen } from './screens/RecipeListScreen'
 import { ServingsScreen } from './screens/ServingsScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import type { AppState, Recipe, ScreenStep } from './types'
@@ -31,10 +32,16 @@ const INITIAL: AppState = {
   generateError: null,
 }
 
-function stepLabel(step: ScreenStep): string | undefined {
+function stepLabel(
+  step: ScreenStep,
+  activeRecipeId: string | null,
+): string | undefined {
   if (step === 'BASE_MEAL') return 'Step 1 of 3'
   if (step === 'PROTEIN_SELECT') return 'Step 2 of 3'
   if (step === 'SERVINGS_REVIEW') return 'Step 3 of 3'
+  if (step === 'RECIPE_RESULTS') {
+    return activeRecipeId ? 'Recipe' : 'Pick a recipe'
+  }
   return undefined
 }
 
@@ -154,6 +161,9 @@ export default function App() {
         return { ...prev, currentStep: 'PROTEIN_SELECT' }
       }
       if (prev.currentStep === 'RECIPE_RESULTS') {
+        if (prev.activeRecipeId) {
+          return { ...prev, activeRecipeId: null }
+        }
         return { ...prev, currentStep: 'SERVINGS_REVIEW' }
       }
       if (prev.currentStep === 'CALENDAR' || prev.currentStep === 'SETTINGS') {
@@ -209,7 +219,7 @@ export default function App() {
       setState((prev) => ({
         ...prev,
         recipes,
-        activeRecipeId: recipes[0]?.id ?? null,
+        activeRecipeId: null,
         isGenerating: false,
         currentStep: 'RECIPE_RESULTS',
         previousStep: 'SERVINGS_REVIEW',
@@ -312,6 +322,10 @@ export default function App() {
     goTo('CALENDAR')
   }
 
+  const activeRecipe = state.activeRecipeId
+    ? state.recipes.find((r) => r.id === state.activeRecipeId) ?? null
+    : null
+
   const showFlowHeader = state.currentStep !== 'SETTINGS'
   const showBack =
     state.currentStep === 'PROTEIN_SELECT' ||
@@ -324,7 +338,11 @@ export default function App() {
       {showFlowHeader ? (
         <AppHeader
           title={isCalendar ? 'Calendar' : 'Add Protein'}
-          stepLabel={isCalendar ? undefined : stepLabel(state.currentStep)}
+          stepLabel={
+            isCalendar
+              ? undefined
+              : stepLabel(state.currentStep, state.activeRecipeId)
+          }
           showBack={showBack}
           onBack={handleBack}
           onCalendar={isCalendar ? undefined : openCalendar}
@@ -338,7 +356,13 @@ export default function App() {
         />
       ) : null}
 
-      <ScreenTransition stepKey={state.currentStep}>
+      <ScreenTransition
+        stepKey={
+          state.currentStep === 'RECIPE_RESULTS'
+            ? `RECIPE_${state.activeRecipeId ?? 'LIST'}`
+            : state.currentStep
+        }
+      >
         {state.currentStep === 'BASE_MEAL' ? (
           <BaseMealScreen
             value={state.baseMeal}
@@ -368,9 +392,20 @@ export default function App() {
           />
         ) : null}
 
-        {state.currentStep === 'RECIPE_RESULTS' ? (
-          <RecipeResultsScreen
+        {state.currentStep === 'RECIPE_RESULTS' && !activeRecipe ? (
+          <RecipeListScreen
             recipes={state.recipes}
+            usedMockHint={usedMock}
+            error={state.generateError}
+            onSelect={(recipeId) =>
+              setState((p) => ({ ...p, activeRecipeId: recipeId }))
+            }
+          />
+        ) : null}
+
+        {state.currentStep === 'RECIPE_RESULTS' && activeRecipe ? (
+          <RecipeDetailScreen
+            recipe={activeRecipe}
             servings={state.servings}
             viewMode={state.recipeViewMode}
             onViewModeChange={(recipeViewMode) =>
@@ -380,7 +415,6 @@ export default function App() {
             onRegenerate={(id) => void handleRegenerate(id)}
             isAdapting={isAdapting}
             onCooked={(recipe) => void handleCooked(recipe)}
-            usedMockHint={usedMock}
             error={state.generateError}
           />
         ) : null}

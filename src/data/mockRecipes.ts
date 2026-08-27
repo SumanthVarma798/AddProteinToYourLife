@@ -230,5 +230,5 @@ export function buildMockRecipes(
     ]
   }
 
-  return recipes.slice(0, 4)
+  return recipes.slice(0, Math.max(4, availableProteins.length + 3))
 }

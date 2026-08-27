@@ -4,7 +4,7 @@ import { PrimaryButton } from '../components/PrimaryButton'
 import type { Recipe } from '../types'
 
 type Props = {
-  recipes: Recipe[]
+  recipe: Recipe
   servings: number
   viewMode: 'list' | 'flashcard'
   onViewModeChange: (mode: 'list' | 'flashcard') => void
@@ -12,12 +12,11 @@ type Props = {
   onRegenerate: (recipeId: string) => void
   isAdapting: boolean
   onCooked: (recipe: Recipe) => void
-  usedMockHint?: boolean
   error?: string | null
 }
 
-export function RecipeResultsScreen({
-  recipes,
+export function RecipeDetailScreen({
+  recipe,
   servings,
   viewMode,
   onViewModeChange,
@@ -25,65 +24,47 @@ export function RecipeResultsScreen({
   onRegenerate,
   isAdapting,
   onCooked,
-  usedMockHint,
   error,
 }: Props) {
-  const [activeIndex, setActiveIndex] = useState(0)
   const [flashStep, setFlashStep] = useState(0)
   const [baselineMissing, setBaselineMissing] = useState<string[]>([])
 
-  const active = recipes[activeIndex] ?? recipes[0]
+  useEffect(() => {
+    setFlashStep(0)
+    setBaselineMissing(
+      recipe.baseIngredients.filter((i) => i.missing).map((i) => i.item),
+    )
+  }, [recipe.id])
 
   useEffect(() => {
-    if (!active) return
+    if (isAdapting) return
     setBaselineMissing(
-      active.baseIngredients.filter((i) => i.missing).map((i) => i.item),
+      recipe.baseIngredients.filter((i) => i.missing).map((i) => i.item),
     )
-  }, [active?.id])
+  }, [isAdapting, recipe])
 
-  useEffect(() => {
-    if (isAdapting || !active) return
-    setBaselineMissing(
-      active.baseIngredients.filter((i) => i.missing).map((i) => i.item),
-    )
-  }, [isAdapting])
+  const scaledIngredients = useMemo(
+    () =>
+      recipe.baseIngredients.map((ing) => ({
+        ...ing,
+        total: +(ing.amountPerServing * servings).toFixed(2),
+      })),
+    [recipe, servings],
+  )
 
-  const scaledIngredients = useMemo(() => {
-    if (!active) return []
-    return active.baseIngredients.map((ing) => ({
-      ...ing,
-      total: +(ing.amountPerServing * servings).toFixed(2),
-    }))
-  }, [active, servings])
-
-  const currentMissing = useMemo(() => {
-    if (!active) return []
-    return active.baseIngredients.filter((i) => i.missing).map((i) => i.item)
-  }, [active])
+  const currentMissing = useMemo(
+    () => recipe.baseIngredients.filter((i) => i.missing).map((i) => i.item),
+    [recipe],
+  )
 
   const hasPendingChanges = useMemo(() => {
-    if (!active) return false
     const a = [...baselineMissing].sort().join('|')
     const b = [...currentMissing].sort().join('|')
     return a !== b
-  }, [active, baselineMissing, currentMissing])
-
-  if (!active) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
-        <p className="text-lg text-ink">No recipes yet. Go back and generate.</p>
-      </div>
-    )
-  }
+  }, [baselineMissing, currentMissing])
 
   return (
     <div className="flex flex-1 flex-col gap-4 px-4 py-5">
-      {usedMockHint ? (
-        <p className="rounded-xl bg-primary/10 px-3 py-2 text-sm font-medium text-primary">
-          Showing starter recipes offline. Live Gemini suggestions appear when
-          the server API key is configured.
-        </p>
-      ) : null}
       {error ? (
         <p className="rounded-xl bg-nonveg/10 px-3 py-2 text-sm font-medium text-nonveg">
           {error}
@@ -116,38 +97,16 @@ export function RecipeResultsScreen({
         </PrimaryButton>
       </div>
 
-      {recipes.length > 1 ? (
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {recipes.map((recipe, index) => (
-            <button
-              key={recipe.id}
-              type="button"
-              onClick={() => {
-                setActiveIndex(index)
-                setFlashStep(0)
-              }}
-              className={`touch-target shrink-0 rounded-xl border-2 px-3 text-sm font-semibold ${
-                index === activeIndex
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border bg-surface text-ink'
-              }`}
-            >
-              {recipe.title}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
       <article className="rounded-2xl border border-border bg-white p-4">
-        <h1 className="text-2xl font-bold text-ink">{active.title}</h1>
+        <h1 className="text-2xl font-bold text-ink">{recipe.title}</h1>
         <p className="mt-1 text-base text-muted">
-          {active.prepTimeMinutes} min · ~{active.proteinPerServingGrams}g
-          protein/serving · {active.category.replace('_', '-')}
+          {recipe.prepTimeMinutes} min · ~{recipe.proteinPerServingGrams}g
+          protein/serving · {recipe.category.replace('_', '-')}
         </p>
-        <p className="mt-2 text-base text-ink">{active.flavorComplementNote}</p>
-        {active.substitutionNote ? (
+        <p className="mt-2 text-base text-ink">{recipe.flavorComplementNote}</p>
+        {recipe.substitutionNote ? (
           <p className="mt-2 rounded-lg bg-fish/10 px-3 py-2 text-sm font-medium text-fish">
-            {active.substitutionNote}
+            {recipe.substitutionNote}
           </p>
         ) : null}
       </article>
@@ -163,7 +122,7 @@ export function RecipeResultsScreen({
                 <li key={ing.item}>
                   <button
                     type="button"
-                    onClick={() => onToggleIngredient(active.id, ing.item)}
+                    onClick={() => onToggleIngredient(recipe.id, ing.item)}
                     disabled={isAdapting}
                     className={`touch-target flex w-full items-center justify-between rounded-xl border-2 px-3 text-left text-base ${
                       ing.missing
@@ -190,7 +149,7 @@ export function RecipeResultsScreen({
             {hasPendingChanges ? (
               <div className="mt-3">
                 <PrimaryButton
-                  onClick={() => onRegenerate(active.id)}
+                  onClick={() => onRegenerate(recipe.id)}
                   disabled={isAdapting}
                 >
                   Regenerate Recipe
@@ -202,9 +161,9 @@ export function RecipeResultsScreen({
           <section>
             <h2 className="mb-2 text-lg font-bold text-ink">Steps</h2>
             <ol className="flex flex-col gap-3">
-              {active.steps.map((step, i) => (
+              {recipe.steps.map((step, i) => (
                 <li
-                  key={`${active.id}-step-${i}`}
+                  key={`${recipe.id}-step-${i}`}
                   className="rounded-xl border border-border bg-white px-4 py-3 text-left text-lg leading-snug text-ink"
                 >
                   <span className="mr-2 font-bold text-primary">{i + 1}.</span>
@@ -218,12 +177,12 @@ export function RecipeResultsScreen({
         <section className="flex flex-1 flex-col gap-4">
           <div className="flex min-h-48 flex-1 items-center justify-center rounded-2xl border-2 border-primary/30 bg-white px-5 py-8 text-center">
             <p className="text-2xl font-bold leading-snug text-ink">
-              {active.steps[flashStep] ?? 'Done!'}
+              {recipe.steps[flashStep] ?? 'Done!'}
             </p>
           </div>
           <p className="text-center text-sm font-semibold text-muted">
-            Step {Math.min(flashStep + 1, active.steps.length)} of{' '}
-            {active.steps.length}
+            Step {Math.min(flashStep + 1, recipe.steps.length)} of{' '}
+            {recipe.steps.length}
           </p>
           <div className="flex gap-2">
             <PrimaryButton
@@ -235,9 +194,9 @@ export function RecipeResultsScreen({
             </PrimaryButton>
             <PrimaryButton
               onClick={() =>
-                setFlashStep((s) => Math.min(active.steps.length - 1, s + 1))
+                setFlashStep((s) => Math.min(recipe.steps.length - 1, s + 1))
               }
-              disabled={flashStep >= active.steps.length - 1 || isAdapting}
+              disabled={flashStep >= recipe.steps.length - 1 || isAdapting}
             >
               Next Step
             </PrimaryButton>
@@ -246,7 +205,7 @@ export function RecipeResultsScreen({
       )}
 
       <div className="safe-bottom pt-2">
-        <PrimaryButton onClick={() => onCooked(active)} disabled={isAdapting}>
+        <PrimaryButton onClick={() => onCooked(recipe)} disabled={isAdapting}>
           Cooked This! (Save to Calendar)
         </PrimaryButton>
       </div>

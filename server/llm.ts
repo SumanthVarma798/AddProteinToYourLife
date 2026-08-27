@@ -31,6 +31,12 @@ export interface GenerateBody {
     category: string
     baseMeal?: string
   }>
+  /** How many recipes this single request should return. */
+  targetCount?: number
+  /** Prefer featuring this protein. */
+  focusProtein?: string
+  /** Avoid repeating these titles. */
+  excludeTitles?: string[]
 }
 
 export interface AdaptBody {
@@ -47,6 +53,14 @@ const RECIPE_JSON_HINT = `JSON:{"recipes":[{"id":"r1","title":"","prepTimeMinute
 export const RECIPE_SYSTEM_PROMPT = `Indian home-cook assistant for high-protein sides. Return STRICT JSON only.
 Rules: pair with the base meal; use available proteins; avoid suppressed/recent repeats; any Indian region OK; max 4 short steps; max 6 ingredients per recipe.`
 
+export function recipeCountBounds(proteinCount: number): {
+  min: number
+  max: number
+} {
+  const min = Math.max(1, proteinCount)
+  return { min, max: min + 3 }
+}
+
 export function buildGenerateUserPrompt(input: GenerateBody): string {
   const history =
     input.recentHistory && input.recentHistory.length > 0
@@ -56,13 +70,22 @@ export function buildGenerateUserPrompt(input: GenerateBody): string {
           .join(', ')
       : 'none'
 
+  const count = Math.max(1, Math.min(input.targetCount ?? 1, 4))
+  const focus = input.focusProtein
+    ? `\nFocus protein (must feature): ${input.focusProtein}`
+    : ''
+  const exclude =
+    input.excludeTitles && input.excludeTitles.length > 0
+      ? `\nDo not repeat these titles: ${input.excludeTitles.join(', ')}`
+      : ''
+
   return `Base meal: ${input.baseMeal?.trim() || 'UNSPECIFIED'}
 Proteins: ${input.availableProteins.join(', ') || 'UNSPECIFIED'}
 Servings: ${input.servings}
 Suppress: ${input.suppressedProteins.join(', ') || 'none'}
-Recent: ${history}
+Recent: ${history}${focus}${exclude}
 
-Return exactly 2 distinct high-protein Indian sides for this base meal.
+Return exactly ${count} distinct high-protein Indian side(s) for this base meal.
 ${RECIPE_JSON_HINT}`
 }
 
@@ -242,17 +265,18 @@ export async function generateRecipesFromLlm(
   body: GenerateBody,
   env?: NodeJS.ProcessEnv,
 ) {
+  const count = Math.max(1, Math.min(body.targetCount ?? 1, 4))
   const json = (await chatCompletionJson({
     system: RECIPE_SYSTEM_PROMPT,
-    user: buildGenerateUserPrompt(body),
+    user: buildGenerateUserPrompt({ ...body, targetCount: count }),
     env,
-    maxOutputTokens: 900,
+    maxOutputTokens: Math.min(1600, 420 * count),
   })) as { recipes?: Recipe[] }
 
   if (!json.recipes?.length) {
     throw new Error('No recipes in response')
   }
-  return json.recipes.slice(0, 2)
+  return json.recipes.slice(0, count)
 }
 
 export async function adaptRecipeFromLlm(

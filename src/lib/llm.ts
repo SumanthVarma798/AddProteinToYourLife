@@ -22,6 +22,14 @@ export interface GenerateInput {
   recentHistory: HistoryEntry[]
 }
 
+export function recipeCountBounds(proteinCount: number): {
+  min: number
+  max: number
+} {
+  const min = Math.max(1, proteinCount)
+  return { min, max: min + 3 }
+}
+
 async function callServerApi<T>(
   path: '/api/recipes' | '/api/adapt',
   body: unknown,
@@ -66,7 +74,8 @@ async function clientDirectCompletion(userPrompt: string, system: string) {
     },
     body: JSON.stringify({
       model,
-      temperature: 0.5,
+      temperature: 0.3,
+      max_tokens: 900,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
@@ -95,57 +104,119 @@ async function clientDirectCompletion(userPrompt: string, system: string) {
   }
 }
 
+function dedupeRecipes(recipes: Recipe[]): Recipe[] {
+  const seen = new Set<string>()
+  const out: Recipe[] = []
+  for (const recipe of recipes) {
+    const key = recipe.title.trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      ...recipe,
+      id: `${recipe.id || 'recipe'}_${out.length}_${Date.now()}`,
+    })
+  }
+  return out
+}
+
+async function requestRecipeBatch(
+  input: GenerateInput & {
+    targetCount: number
+    focusProtein?: string
+    excludeTitles?: string[]
+  },
+): Promise<Recipe[]> {
+  const data = await callServerApi<RecipesResponse>('/api/recipes', input)
+  return data.recipes ?? []
+}
+
+/**
+ * Parallel generation:
+ * - 1 focused request per selected protein (min coverage)
+ * - 1 bonus request for up to 3 extra variety recipes
+ * Final count is between proteinCount and proteinCount + 3.
+ */
 export async function generateRecipes(
   input: GenerateInput,
 ): Promise<{ recipes: Recipe[]; usedMock: boolean }> {
+  const proteins =
+    input.availableProteins.length > 0
+      ? input.availableProteins
+      : ['Paneer']
+  const { min, max } = recipeCountBounds(proteins.length)
+  const bonusCount = max - min
+
   try {
-    const data = await callServerApi<RecipesResponse & { source?: string }>(
-      '/api/recipes',
-      input,
+    const focusedPromises = proteins.map((protein) =>
+      requestRecipeBatch({
+        ...input,
+        availableProteins: [protein],
+        focusProtein: protein,
+        targetCount: 1,
+      }).catch(() => [] as Recipe[]),
     )
-    if (!data.recipes?.length) throw new Error('No recipes in response')
-    return { recipes: data.recipes, usedMock: false }
+
+    const bonusPromise =
+      bonusCount > 0
+        ? requestRecipeBatch({
+            ...input,
+            availableProteins: proteins,
+            targetCount: bonusCount,
+          }).catch(() => [] as Recipe[])
+        : Promise.resolve([] as Recipe[])
+
+    const [focusedGroups, bonus] = await Promise.all([
+      Promise.all(focusedPromises),
+      bonusPromise,
+    ])
+
+    const focused = focusedGroups.flat()
+    const merged = dedupeRecipes([...focused, ...bonus])
+
+    if (merged.length < min) {
+      // Fill remaining with one more variety call if needed.
+      const refill = await requestRecipeBatch({
+        ...input,
+        availableProteins: proteins,
+        targetCount: min - merged.length,
+        excludeTitles: merged.map((r) => r.title),
+      }).catch(() => [] as Recipe[])
+      const filled = dedupeRecipes([...merged, ...refill])
+      if (filled.length === 0) throw new Error('No recipes in response')
+      return { recipes: filled.slice(0, max), usedMock: false }
+    }
+
+    if (merged.length === 0) throw new Error('No recipes in response')
+    return { recipes: merged.slice(0, max), usedMock: false }
   } catch (serverError) {
     const serverMsg =
       serverError instanceof Error ? serverError.message : String(serverError)
 
-    // Fall back to optional personal key in Settings, then mocks.
     try {
-      const historyLines =
-        input.recentHistory.length > 0
-          ? input.recentHistory
-              .map((h) => {
-                const base = h.baseMeal ? ` with ${h.baseMeal}` : ''
-                return `- ${h.date}: ${h.proteinItem} (${h.category})${base}`
-              })
-              .join('\n')
-          : '- None logged yet'
-
-      const userPrompt = `CONTEXT FOR TODAY'S SUGGESTIONS:
-- Today's base meal already cooked: ${input.baseMeal || 'UNSPECIFIED'}
-- Proteins available in the kitchen now: ${input.availableProteins.join(', ') || 'UNSPECIFIED'}
-- Number of servings: ${input.servings}
-- Proteins to suppress (cooked heavily in last 2 days): ${input.suppressedProteins.join(', ') || 'None'}
-- Recent protein history (newest first):
-${historyLines}
-
-Suggest 2-4 DISTINCT high-protein Telangana-friendly side dishes that pair with today's base meal.
-Return STRICT JSON with a "recipes" array.`
+      const { max: clientMax } = recipeCountBounds(proteins.length)
+      const userPrompt = `Base meal: ${input.baseMeal || 'UNSPECIFIED'}
+Proteins: ${proteins.join(', ')}
+Servings: ${input.servings}
+Return ${clientMax} distinct high-protein Indian sides as JSON {"recipes":[...]}`
 
       const json = (await clientDirectCompletion(
         userPrompt,
-        'You are an expert Telangana South Indian culinary assistant. Return STRICT JSON only.',
+        'Indian home-cook assistant. Return STRICT JSON only.',
       )) as RecipesResponse
       if (!json.recipes?.length) throw new Error('No recipes in response')
-      return { recipes: json.recipes, usedMock: false }
+      return {
+        recipes: dedupeRecipes(json.recipes).slice(0, clientMax),
+        usedMock: false,
+      }
     } catch (clientError) {
       console.warn('Recipe generation fell back to mocks:', serverMsg, clientError)
+      const { max: mockMax } = recipeCountBounds(proteins.length)
       return {
         recipes: buildMockRecipes(
-          input.availableProteins,
+          proteins,
           input.suppressedProteins,
           input.baseMeal,
-        ),
+        ).slice(0, mockMax),
         usedMock: true,
       }
     }
