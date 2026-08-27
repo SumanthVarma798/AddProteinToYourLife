@@ -134,7 +134,7 @@ export function resolveLlmConfig(env: NodeJS.ProcessEnv = process.env) {
   const customBase = env.LLM_API_BASE_URL || ''
   const model =
     env.LLM_MODEL ||
-    (provider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini')
+    (provider === 'gemini' ? 'gemini-3.6-flash' : 'gpt-4o-mini')
 
   let endpoint = 'https://api.openai.com/v1/chat/completions'
   if (provider === 'gemini') {

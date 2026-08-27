@@ -48,7 +48,7 @@ async function clientDirectCompletion(userPrompt: string, system: string) {
   const customBase = (await getSetting('API_BASE_URL')) ?? undefined
   const model =
     (await getSetting('LLM_MODEL')) ??
-    (provider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini')
+    (provider === 'gemini' ? 'gemini-3.6-flash' : 'gpt-4o-mini')
 
   let endpoint =
     'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'

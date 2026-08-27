@@ -94,7 +94,7 @@ export function SettingsScreen({ onClose }: Props) {
           value={model}
           onChange={(e) => setModel(e.target.value)}
           placeholder={
-            provider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini'
+            provider === 'gemini' ? 'gemini-3.6-flash' : 'gpt-4o-mini'
           }
           className="touch-target w-full rounded-xl border-2 border-border bg-surface px-3 text-base"
         />
