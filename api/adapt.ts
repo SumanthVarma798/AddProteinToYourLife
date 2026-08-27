@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adaptRecipeFromLlm, type AdaptBody } from '../server/llm'
+import { adaptRecipeFromLlm, type AdaptBody } from '../server/llm.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
