@@ -1,4 +1,9 @@
-import { CalendarBlank, CaretLeft, GearSix } from '@phosphor-icons/react'
+import {
+  CalendarBlank,
+  CaretLeft,
+  GearSix,
+  House,
+} from '@phosphor-icons/react'
 
 type Props = {
   title?: string
@@ -6,6 +11,7 @@ type Props = {
   showBack?: boolean
   onBack?: () => void
   onCalendar?: () => void
+  onHome?: () => void
   onSettings?: () => void
   showCalendar?: boolean
 }
@@ -16,12 +22,13 @@ export function AppHeader({
   showBack = false,
   onBack,
   onCalendar,
+  onHome,
   onSettings,
   showCalendar = true,
 }: Props) {
   return (
-    <header className="sticky top-0 z-20 border-b border-border bg-cream/95 px-3 py-2 backdrop-blur">
-      <div className="grid grid-cols-[56px_1fr_56px] items-center gap-1">
+    <header className="shrink-0 border-b border-border bg-cream px-3 py-2">
+      <div className="grid grid-cols-[56px_1fr_auto] items-center gap-1">
         <div className="flex justify-start">
           {showBack ? (
             <button
@@ -55,7 +62,17 @@ export function AppHeader({
               <GearSix size={26} weight="bold" />
             </button>
           ) : null}
-          {showCalendar ? (
+          {onHome ? (
+            <button
+              type="button"
+              onClick={onHome}
+              className="touch-target inline-flex items-center justify-center rounded-xl text-header-icon"
+              aria-label="Go home"
+            >
+              <House size={28} weight="bold" />
+            </button>
+          ) : null}
+          {showCalendar && !onHome ? (
             <button
               type="button"
               onClick={onCalendar}

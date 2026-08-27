@@ -247,23 +247,28 @@ export default function App() {
   }
 
   const showFlowHeader =
-    state.currentStep !== 'CALENDAR' && state.currentStep !== 'SETTINGS'
+    state.currentStep !== 'SETTINGS'
   const showBack =
     state.currentStep === 'PROTEIN_SELECT' ||
     state.currentStep === 'SERVINGS_REVIEW' ||
-    state.currentStep === 'RECIPE_RESULTS' ||
-    state.currentStep === 'SETTINGS'
+    state.currentStep === 'RECIPE_RESULTS'
+  const isCalendar = state.currentStep === 'CALENDAR'
 
   return (
     <div className="flex min-h-[100dvh] flex-col bg-cream">
       {showFlowHeader ? (
         <AppHeader
-          stepLabel={stepLabel(state.currentStep)}
+          title={isCalendar ? 'Calendar' : 'Add Protein'}
+          stepLabel={isCalendar ? undefined : stepLabel(state.currentStep)}
           showBack={showBack}
           onBack={handleBack}
-          onCalendar={openCalendar}
+          onCalendar={isCalendar ? undefined : openCalendar}
+          onHome={isCalendar ? goHome : undefined}
+          showCalendar={!isCalendar}
           onSettings={
-            state.currentStep === 'BASE_MEAL' ? openSettings : undefined
+            state.currentStep === 'BASE_MEAL' || isCalendar
+              ? openSettings
+              : undefined
           }
         />
       ) : null}
@@ -315,9 +320,7 @@ export default function App() {
           />
         ) : null}
 
-        {state.currentStep === 'CALENDAR' ? (
-          <CalendarScreen onHome={goHome} onSettings={openSettings} />
-        ) : null}
+        {state.currentStep === 'CALENDAR' ? <CalendarScreen /> : null}
 
         {state.currentStep === 'SETTINGS' ? (
           <div className="flex flex-1 flex-col">
