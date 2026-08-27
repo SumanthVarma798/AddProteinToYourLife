@@ -330,7 +330,8 @@ export default function App() {
   const showBack =
     state.currentStep === 'PROTEIN_SELECT' ||
     state.currentStep === 'SERVINGS_REVIEW' ||
-    state.currentStep === 'RECIPE_RESULTS'
+    state.currentStep === 'RECIPE_RESULTS' ||
+    state.currentStep === 'CALENDAR'
   const isCalendar = state.currentStep === 'CALENDAR'
 
   return (
