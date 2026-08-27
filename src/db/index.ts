@@ -101,3 +101,7 @@ export async function getLogsForMonths(monthCount = 6): Promise<MealLog[]> {
     end.toISOString().slice(0, 10),
   )
 }
+
+export async function getAllMealLogs(): Promise<MealLog[]> {
+  return db.mealLogs.orderBy('date').toArray()
+}

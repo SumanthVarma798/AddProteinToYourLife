@@ -154,34 +154,40 @@ Return STRICT JSON with a "recipes" array.`
 
 export async function adaptRecipe(input: {
   recipeTitle: string
-  missingIngredient: string
+  missingIngredients: string[]
   steps: string[]
   baseMeal?: string
 }): Promise<AdaptationResponse> {
+  const missing = input.missingIngredients.map((item) => item.trim()).filter(Boolean)
   try {
-    return await callServerApi<AdaptationResponse>('/api/adapt', input)
+    return await callServerApi<AdaptationResponse>('/api/adapt', {
+      ...input,
+      missingIngredients: missing,
+    })
   } catch {
     try {
-      const userPrompt = `The cook is missing "${input.missingIngredient}" from "${input.recipeTitle}".
+      const userPrompt = `The cook is missing these ingredients from "${input.recipeTitle}": ${missing.join(', ')}.
 Base meal: ${input.baseMeal || 'UNSPECIFIED'}
-Current steps: ${JSON.stringify(input.steps)}
+Original steps: ${JSON.stringify(input.steps)}
 Return STRICT JSON: { "substitutionNote": "...", "updatedSteps": ["..."] }`
       const json = (await clientDirectCompletion(
         userPrompt,
-        'Adapt Telangana home recipes when an ingredient is missing. STRICT JSON only.',
+        'Adapt Indian home recipes when ingredients are missing. STRICT JSON only.',
       )) as AdaptationResponse
       if (!json.substitutionNote || !json.updatedSteps?.length) {
         throw new Error('Invalid adaptation')
       }
       return json
     } catch {
+      const label = missing.join(', ')
       return {
-        substitutionNote: `No ${input.missingIngredient}? Skip it or swap with a common kitchen substitute you already have.`,
-        updatedSteps: input.steps.map((step) =>
-          step.toLowerCase().includes(input.missingIngredient.toLowerCase())
-            ? `${step} (or skip ${input.missingIngredient} if missing)`
-            : step,
-        ),
+        substitutionNote: `Missing ${label}? Skip those items or swap with common kitchen substitutes.`,
+        updatedSteps: input.steps.map((step) => {
+          const hit = missing.some((item) =>
+            step.toLowerCase().includes(item.toLowerCase()),
+          )
+          return hit ? `${step} (adapt if missing: ${label})` : step
+        }),
       }
     }
   }

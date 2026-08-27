@@ -65,4 +65,20 @@
   .safe-bottom {
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
+
+  .animate-pulse-card {
+    animation: pulse-card 1.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse-card {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.72;
+      transform: scale(0.985);
+    }
+  }
 }

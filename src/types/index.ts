@@ -41,6 +41,8 @@ export interface Recipe {
   steps: string[]
   flavorComplementNote: string
   substitutionNote?: string
+  /** Steps from first generation; used when regenerating after ingredient edits. */
+  originalSteps?: string[]
 }
 
 export interface RecipesResponse {

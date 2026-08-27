@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Microphone } from '@phosphor-icons/react'
 import { PrimaryButton } from '../components/PrimaryButton'
 import { DEFAULT_BASE_MEAL_CHIPS } from '../data/proteins'
 import { getRecentBaseMeals } from '../db'
+import { joinBaseMeals, parseBaseMeals } from '../lib/dates'
 
 type Props = {
   value: string
@@ -12,6 +13,7 @@ type Props = {
 
 export function BaseMealScreen({ value, onChange, onNext }: Props) {
   const [chips, setChips] = useState(DEFAULT_BASE_MEAL_CHIPS)
+  const selected = useMemo(() => parseBaseMeals(value), [value])
 
   useEffect(() => {
     void getRecentBaseMeals(3).then((rows) => {
@@ -21,13 +23,26 @@ export function BaseMealScreen({ value, onChange, onNext }: Props) {
     })
   }, [])
 
+  const toggleChip = (chip: string) => {
+    const current = parseBaseMeals(value)
+    const exists = current.some(
+      (item) => item.toLowerCase() === chip.toLowerCase(),
+    )
+    const next = exists
+      ? current.filter((item) => item.toLowerCase() !== chip.toLowerCase())
+      : [...current, chip]
+    onChange(joinBaseMeals(next))
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-5 px-4 py-5">
       <div>
         <h1 className="text-2xl font-bold leading-tight text-ink">
           What did you cook for main meal today?
         </h1>
-        <p className="mt-1 text-base text-muted">(Optional)</p>
+        <p className="mt-1 text-base text-muted">
+          Optional. Tap one or more suggestions.
+        </p>
       </div>
 
       <label className="block">
@@ -53,23 +68,30 @@ export function BaseMealScreen({ value, onChange, onNext }: Props) {
 
       <div>
         <p className="mb-2 text-sm font-semibold text-ink">
-          Quick tap last cooked
+          Quick tap last cooked (multi-select)
         </p>
         <div className="flex flex-wrap gap-2">
-          {chips.map((chip) => (
-            <button
-              key={chip}
-              type="button"
-              onClick={() => onChange(chip)}
-              className={`touch-target rounded-xl border-2 px-4 text-base font-semibold ${
-                value === chip
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border bg-surface text-ink'
-              }`}
-            >
-              + {chip}
-            </button>
-          ))}
+          {chips.map((chip) => {
+            const isOn = selected.some(
+              (item) => item.toLowerCase() === chip.toLowerCase(),
+            )
+            return (
+              <button
+                key={chip}
+                type="button"
+                onClick={() => toggleChip(chip)}
+                aria-pressed={isOn}
+                className={`touch-target rounded-xl border-2 px-4 text-base font-semibold ${
+                  isOn
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border bg-surface text-ink'
+                }`}
+              >
+                {isOn ? '✓ ' : '+ '}
+                {chip}
+              </button>
+            )
+          })}
         </div>
       </div>
 

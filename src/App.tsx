@@ -4,6 +4,7 @@ import { ScreenTransition } from './components/ScreenTransition'
 import { bumpRecentBaseMeal, logCookedMeal } from './db'
 import { categoryForProtein } from './data/proteins'
 import { adaptRecipe, generateRecipes } from './lib/llm'
+import { parseBaseMeals } from './lib/dates'
 import {
   getSuppressedProteins,
   rankProteinsForSuggestion,
@@ -37,9 +38,18 @@ function stepLabel(step: ScreenStep): string | undefined {
   return undefined
 }
 
+function withOriginalSteps(recipes: Recipe[]): Recipe[] {
+  return recipes.map((recipe) => ({
+    ...recipe,
+    originalSteps: recipe.originalSteps ?? [...recipe.steps],
+    baseIngredients: recipe.baseIngredients.map((ing) => ({ ...ing })),
+  }))
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(INITIAL)
   const [usedMock, setUsedMock] = useState(false)
+  const [isAdapting, setIsAdapting] = useState(false)
 
   const goTo = useCallback((step: ScreenStep) => {
     setState((prev) => ({
@@ -94,8 +104,10 @@ export default function App() {
       isGenerating: true,
       generateError: null,
     }))
-    if (state.baseMeal.trim()) {
-      await bumpRecentBaseMeal(state.baseMeal.trim())
+
+    const meals = parseBaseMeals(state.baseMeal)
+    for (const meal of meals) {
+      await bumpRecentBaseMeal(meal)
     }
 
     const [suppressed, weekLogs] = await Promise.all([
@@ -127,10 +139,11 @@ export default function App() {
         recentHistory,
       })
       setUsedMock(result.usedMock)
+      const recipes = withOriginalSteps(result.recipes)
       setState((prev) => ({
         ...prev,
-        recipes: result.recipes,
-        activeRecipeId: result.recipes[0]?.id ?? null,
+        recipes,
+        activeRecipeId: recipes[0]?.id ?? null,
         isGenerating: false,
         currentStep: 'RECIPE_RESULTS',
         previousStep: 'SERVINGS_REVIEW',
@@ -145,45 +158,80 @@ export default function App() {
     }
   }
 
-  const handleToggleIngredient = async (
-    recipeId: string,
-    ingredientItem: string,
-  ) => {
-    const recipe = state.recipes.find((r) => r.id === recipeId)
-    if (!recipe) return
-    const ingredient = recipe.baseIngredients.find(
-      (i) => i.item === ingredientItem,
-    )
-    if (!ingredient) return
-
-    const makingMissing = !ingredient.missing
-    let nextRecipe: Recipe = {
-      ...recipe,
-      baseIngredients: recipe.baseIngredients.map((i) =>
-        i.item === ingredientItem ? { ...i, missing: makingMissing } : i,
-      ),
-    }
-
-    if (makingMissing) {
-      const adapted = await adaptRecipe({
-        recipeTitle: recipe.title,
-        missingIngredient: ingredientItem,
-        steps: recipe.steps,
-        baseMeal: state.baseMeal.trim(),
-      })
-      nextRecipe = {
-        ...nextRecipe,
-        substitutionNote: adapted.substitutionNote,
-        steps: adapted.updatedSteps,
-      }
-    } else {
-      nextRecipe = { ...nextRecipe, substitutionNote: undefined }
-    }
-
+  const handleToggleIngredient = (recipeId: string, ingredientItem: string) => {
     setState((prev) => ({
       ...prev,
-      recipes: prev.recipes.map((r) => (r.id === recipeId ? nextRecipe : r)),
+      recipes: prev.recipes.map((recipe) => {
+        if (recipe.id !== recipeId) return recipe
+        return {
+          ...recipe,
+          baseIngredients: recipe.baseIngredients.map((ing) =>
+            ing.item === ingredientItem
+              ? { ...ing, missing: !ing.missing }
+              : ing,
+          ),
+        }
+      }),
     }))
+  }
+
+  const handleRegenerate = async (recipeId: string) => {
+    const recipe = state.recipes.find((r) => r.id === recipeId)
+    if (!recipe) return
+
+    const missing = recipe.baseIngredients
+      .filter((ing) => ing.missing)
+      .map((ing) => ing.item)
+    const baselineSteps = recipe.originalSteps ?? recipe.steps
+
+    setIsAdapting(true)
+    setState((prev) => ({ ...prev, generateError: null }))
+
+    try {
+      if (missing.length === 0) {
+        setState((prev) => ({
+          ...prev,
+          recipes: prev.recipes.map((r) =>
+            r.id === recipeId
+              ? {
+                  ...r,
+                  steps: [...baselineSteps],
+                  substitutionNote: undefined,
+                }
+              : r,
+          ),
+        }))
+      } else {
+        const adapted = await adaptRecipe({
+          recipeTitle: recipe.title,
+          missingIngredients: missing,
+          steps: baselineSteps,
+          baseMeal: state.baseMeal.trim(),
+        })
+        setState((prev) => ({
+          ...prev,
+          recipes: prev.recipes.map((r) =>
+            r.id === recipeId
+              ? {
+                  ...r,
+                  steps: adapted.updatedSteps,
+                  substitutionNote: adapted.substitutionNote,
+                }
+              : r,
+          ),
+        }))
+      }
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        generateError:
+          error instanceof Error
+            ? error.message
+            : 'Could not update the recipe',
+      }))
+    } finally {
+      setIsAdapting(false)
+    }
   }
 
   const handleCooked = async (recipe: Recipe) => {
@@ -258,9 +306,9 @@ export default function App() {
             onViewModeChange={(recipeViewMode) =>
               setState((p) => ({ ...p, recipeViewMode }))
             }
-            onToggleIngredient={(id, item) =>
-              void handleToggleIngredient(id, item)
-            }
+            onToggleIngredient={handleToggleIngredient}
+            onRegenerate={(id) => void handleRegenerate(id)}
+            isAdapting={isAdapting}
             onCooked={(recipe) => void handleCooked(recipe)}
             usedMockHint={usedMock}
             error={state.generateError}

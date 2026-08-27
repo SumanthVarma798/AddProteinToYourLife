@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { GeneratingWaitCard } from '../components/GeneratingWaitCard'
 import { PrimaryButton } from '../components/PrimaryButton'
 import type { Recipe } from '../types'
 
@@ -8,6 +9,8 @@ type Props = {
   viewMode: 'list' | 'flashcard'
   onViewModeChange: (mode: 'list' | 'flashcard') => void
   onToggleIngredient: (recipeId: string, ingredientItem: string) => void
+  onRegenerate: (recipeId: string) => void
+  isAdapting: boolean
   onCooked: (recipe: Recipe) => void
   usedMockHint?: boolean
   error?: string | null
@@ -19,14 +22,31 @@ export function RecipeResultsScreen({
   viewMode,
   onViewModeChange,
   onToggleIngredient,
+  onRegenerate,
+  isAdapting,
   onCooked,
   usedMockHint,
   error,
 }: Props) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [flashStep, setFlashStep] = useState(0)
+  const [baselineMissing, setBaselineMissing] = useState<string[]>([])
 
   const active = recipes[activeIndex] ?? recipes[0]
+
+  useEffect(() => {
+    if (!active) return
+    setBaselineMissing(
+      active.baseIngredients.filter((i) => i.missing).map((i) => i.item),
+    )
+  }, [active?.id])
+
+  useEffect(() => {
+    if (isAdapting || !active) return
+    setBaselineMissing(
+      active.baseIngredients.filter((i) => i.missing).map((i) => i.item),
+    )
+  }, [isAdapting])
 
   const scaledIngredients = useMemo(() => {
     if (!active) return []
@@ -35,6 +55,18 @@ export function RecipeResultsScreen({
       total: +(ing.amountPerServing * servings).toFixed(2),
     }))
   }, [active, servings])
+
+  const currentMissing = useMemo(() => {
+    if (!active) return []
+    return active.baseIngredients.filter((i) => i.missing).map((i) => i.item)
+  }, [active])
+
+  const hasPendingChanges = useMemo(() => {
+    if (!active) return false
+    const a = [...baselineMissing].sort().join('|')
+    const b = [...currentMissing].sort().join('|')
+    return a !== b
+  }, [active, baselineMissing, currentMissing])
 
   if (!active) {
     return (
@@ -58,11 +90,16 @@ export function RecipeResultsScreen({
         </p>
       ) : null}
 
+      {isAdapting ? (
+        <GeneratingWaitCard message="Updating recipe for missing ingredients..." />
+      ) : null}
+
       <div className="flex gap-2">
         <PrimaryButton
           fullWidth
           variant={viewMode === 'list' ? 'primary' : 'secondary'}
           onClick={() => onViewModeChange('list')}
+          disabled={isAdapting}
         >
           List View
         </PrimaryButton>
@@ -73,6 +110,7 @@ export function RecipeResultsScreen({
             onViewModeChange('flashcard')
             setFlashStep(0)
           }}
+          disabled={isAdapting}
         >
           Flashcards
         </PrimaryButton>
@@ -126,6 +164,7 @@ export function RecipeResultsScreen({
                   <button
                     type="button"
                     onClick={() => onToggleIngredient(active.id, ing.item)}
+                    disabled={isAdapting}
                     className={`touch-target flex w-full items-center justify-between rounded-xl border-2 px-3 text-left text-base ${
                       ing.missing
                         ? 'border-nonveg/40 bg-nonveg/5 text-muted line-through'
@@ -145,8 +184,19 @@ export function RecipeResultsScreen({
               ))}
             </ul>
             <p className="mt-2 text-sm text-muted">
-              Tap an ingredient if you do not have it - we will adapt the steps.
+              Tap ingredients you do not have. When ready, regenerate the
+              recipe.
             </p>
+            {hasPendingChanges ? (
+              <div className="mt-3">
+                <PrimaryButton
+                  onClick={() => onRegenerate(active.id)}
+                  disabled={isAdapting}
+                >
+                  Regenerate Recipe
+                </PrimaryButton>
+              </div>
+            ) : null}
           </section>
 
           <section>
@@ -179,7 +229,7 @@ export function RecipeResultsScreen({
             <PrimaryButton
               variant="secondary"
               onClick={() => setFlashStep((s) => Math.max(0, s - 1))}
-              disabled={flashStep === 0}
+              disabled={flashStep === 0 || isAdapting}
             >
               Previous
             </PrimaryButton>
@@ -187,7 +237,7 @@ export function RecipeResultsScreen({
               onClick={() =>
                 setFlashStep((s) => Math.min(active.steps.length - 1, s + 1))
               }
-              disabled={flashStep >= active.steps.length - 1}
+              disabled={flashStep >= active.steps.length - 1 || isAdapting}
             >
               Next Step
             </PrimaryButton>
@@ -196,7 +246,7 @@ export function RecipeResultsScreen({
       )}
 
       <div className="safe-bottom pt-2">
-        <PrimaryButton onClick={() => onCooked(active)}>
+        <PrimaryButton onClick={() => onCooked(active)} disabled={isAdapting}>
           Cooked This! (Save to Calendar)
         </PrimaryButton>
       </div>

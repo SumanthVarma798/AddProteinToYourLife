@@ -33,3 +33,55 @@ export function listRecentMonths(count: number): Array<{ year: number; month: nu
   }
   return out
 }
+
+/** Current month + next 11 months, then past months newest-first back to earliest log. */
+export function listCalendarMonths(earliestIso: string | null): Array<{
+  year: number
+  month: number
+  section: 'upcoming' | 'history'
+}> {
+  const now = new Date()
+  const upcoming: Array<{ year: number; month: number; section: 'upcoming' }> =
+    []
+  for (let i = 0; i < 12; i += 1) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
+    upcoming.push({
+      year: d.getFullYear(),
+      month: d.getMonth(),
+      section: 'upcoming',
+    })
+  }
+
+  const history: Array<{ year: number; month: number; section: 'history' }> = []
+  if (earliestIso) {
+    const earliest = new Date(
+      Number(earliestIso.slice(0, 4)),
+      Number(earliestIso.slice(5, 7)) - 1,
+      1,
+    )
+    const current = new Date(now.getFullYear(), now.getMonth(), 1)
+    const cursor = new Date(current)
+    cursor.setMonth(cursor.getMonth() - 1)
+    while (cursor >= earliest) {
+      history.push({
+        year: cursor.getFullYear(),
+        month: cursor.getMonth(),
+        section: 'history',
+      })
+      cursor.setMonth(cursor.getMonth() - 1)
+    }
+  }
+
+  return [...upcoming, ...history]
+}
+
+export function parseBaseMeals(value: string): string[] {
+  return value
+    .split(/,|\+|\/|\band\b/gi)
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+export function joinBaseMeals(meals: string[]): string {
+  return meals.join(', ')
+}

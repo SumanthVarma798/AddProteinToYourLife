@@ -1,4 +1,5 @@
 import { Minus, Plus } from '@phosphor-icons/react'
+import { GeneratingWaitCard } from '../components/GeneratingWaitCard'
 import { PrimaryButton } from '../components/PrimaryButton'
 
 type Props = {
@@ -67,13 +68,7 @@ export function ServingsScreen({
       </div>
 
       {isGenerating ? (
-        <div
-          className="rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-center text-base font-semibold text-primary"
-          role="status"
-          aria-live="polite"
-        >
-          Generating protein dishes...
-        </div>
+        <GeneratingWaitCard message="Generating protein dishes..." />
       ) : null}
 
       <div className="mt-auto safe-bottom pt-4">

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { House } from '@phosphor-icons/react'
 import { PrimaryButton } from '../components/PrimaryButton'
-import { getLogsForMonths, type MealLog } from '../db'
+import { getAllMealLogs, type MealLog } from '../db'
 import {
   buildMonthGrid,
   formatMonthLabel,
-  listRecentMonths,
+  listCalendarMonths,
 } from '../lib/dates'
 import {
   buildRotationBanner,
@@ -25,10 +25,7 @@ const DOT: Record<MealCategory, string> = {
   NONE: 'bg-slate-300',
 }
 
-function categoryForDate(
-  logs: MealLog[],
-  iso: string,
-): MealCategory {
+function categoryForDate(logs: MealLog[], iso: string): MealCategory {
   const dayLogs = logs.filter((l) => l.date === iso)
   if (dayLogs.some((l) => l.category === 'FISH')) return 'FISH'
   if (dayLogs.some((l) => l.category === 'NON_VEG')) return 'NON_VEG'
@@ -39,22 +36,35 @@ function categoryForDate(
 export function CalendarScreen({ onHome, onSettings }: Props) {
   const [logs, setLogs] = useState<MealLog[]>([])
   const [banner, setBanner] = useState('Loading protein history...')
-  const months = useMemo(() => listRecentMonths(4), [])
+  const [earliestIso, setEarliestIso] = useState<string | null>(null)
+
+  const months = useMemo(
+    () => listCalendarMonths(earliestIso),
+    [earliestIso],
+  )
 
   useEffect(() => {
     void (async () => {
-      const [monthLogs, weekLogs] = await Promise.all([
-        getLogsForMonths(4),
+      const [allLogs, weekLogs] = await Promise.all([
+        getAllMealLogs(),
         getRollingWeekLogs(),
       ])
-      setLogs(monthLogs)
+      setLogs(allLogs)
+      const earliest =
+        allLogs.length > 0
+          ? [...allLogs].sort((a, b) => a.date.localeCompare(b.date))[0]?.date ??
+            null
+          : null
+      setEarliestIso(earliest)
       setBanner(buildRotationBanner(weekLogs))
     })()
   }, [])
 
+  let sawHistoryHeading = false
+
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className="sticky top-0 z-10 border-b border-border bg-cream/95 px-4 py-3 backdrop-blur">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 border-b border-border bg-cream px-4 py-3">
         <div className="flex items-start justify-between gap-2">
           <div>
             <h1 className="text-xl font-bold text-ink">
@@ -72,11 +82,18 @@ export function CalendarScreen({ onHome, onSettings }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 pb-28 pt-4">
-        {months.map(({ year, month }) => {
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-4">
+        {months.map(({ year, month, section }) => {
+          const showHistoryHeading = section === 'history' && !sawHistoryHeading
+          if (showHistoryHeading) sawHistoryHeading = true
           const cells = buildMonthGrid(year, month)
           return (
             <section key={`${year}-${month}`} className="mb-8">
+              {showHistoryHeading ? (
+                <h2 className="mb-4 text-base font-bold uppercase tracking-wide text-muted">
+                  History
+                </h2>
+              ) : null}
               <h2 className="mb-3 text-lg font-bold text-ink">
                 {formatMonthLabel(year, month)}
               </h2>
@@ -112,14 +129,14 @@ export function CalendarScreen({ onHome, onSettings }: Props) {
           )
         })}
 
-        <p className="mb-4 text-sm font-medium text-muted">
+        <p className="mb-2 text-sm font-medium text-muted">
           Legend: <span className="text-veg">Veg</span> ·{' '}
           <span className="text-nonveg">Non-Veg</span> ·{' '}
           <span className="text-fish">Fish</span> · Gray = none
         </p>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-[480px] border-t border-border bg-cream px-4 pt-3 safe-bottom">
+      <div className="shrink-0 border-t border-border bg-cream px-4 pt-3 safe-bottom">
         <PrimaryButton onClick={onHome}>
           <House size={22} weight="bold" />
           Home

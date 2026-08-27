@@ -35,20 +35,24 @@ export interface GenerateBody {
 
 export interface AdaptBody {
   recipeTitle: string
-  missingIngredient: string
+  /** Preferred: all missing ingredients selected by the cook. */
+  missingIngredients?: string[]
+  /** Legacy single-ingredient field. */
+  missingIngredient?: string
   steps: string[]
   baseMeal?: string
 }
 
-export const RECIPE_SYSTEM_PROMPT = `You are an expert Telangana South Indian culinary assistant specializing in high-protein meal pairings for elderly home cooks.
+export const RECIPE_SYSTEM_PROMPT = `You are an expert Indian home-cooking assistant specializing in high-protein meal pairings for elderly cooks.
 Return STRICT JSON only. No markdown fences. No commentary outside JSON.
 
 Rules:
-- Recipes must complement the given base meal (dal, pulusu, fry curry, etc.).
+- Base meals are often South Indian (pappu, pulusu, fry curry, rice plates), but protein side dishes may come from ANY region of India (North, South, East, West, coastal, etc.) when they pair well.
+- Recipes must complement the given base meal.
 - Use ONLY proteins from the available kitchen list when possible.
 - Avoid suppressed proteins and avoid repeating the same protein from recent history when alternatives exist.
 - Steps must be short, clear, and large-print friendly (simple verbs, no jargon).
-- Prefer Telangana / Andhra home-style seasoning (curry leaves, mustard, pepper, gongura, etc. when appropriate).
+- Prefer common Indian home-kitchen techniques and seasonings.
 - Scale ingredient amounts as per-serving values.
 
 OUTPUT FORMAT:
@@ -81,7 +85,7 @@ export function buildGenerateUserPrompt(input: GenerateBody): string {
       : '- None logged yet'
 
   return `CONTEXT FOR TODAY'S SUGGESTIONS:
-- Today's base meal already cooked: ${input.baseMeal?.trim() || 'UNSPECIFIED'}
+- Today's base meal already cooked (often South Indian): ${input.baseMeal?.trim() || 'UNSPECIFIED'}
 - Proteins available in the kitchen now: ${input.availableProteins.join(', ') || 'UNSPECIFIED'}
 - Number of servings: ${input.servings}
 - Proteins to suppress (cooked heavily in last 2 days): ${input.suppressedProteins.join(', ') || 'None'}
@@ -89,19 +93,33 @@ export function buildGenerateUserPrompt(input: GenerateBody): string {
 ${historyLines}
 
 TASK:
-Suggest 2-4 DISTINCT high-protein side dishes that pair specifically with today's base meal.
+Suggest 2-4 DISTINCT high-protein Indian side dishes that pair specifically with today's base meal.
+Sides may be from any Indian region; they do not need to be South Indian style.
 Vary categories when possible. Prefer proteins not seen recently in history.
 Return STRICT JSON matching the schema.`
 }
 
-export function buildAdaptUserPrompt(input: AdaptBody): string {
-  return `The cook is missing "${input.missingIngredient}" from the recipe "${input.recipeTitle}".
-Base meal on the table: ${input.baseMeal?.trim() || 'UNSPECIFIED'}
-Current steps: ${JSON.stringify(input.steps)}
+export function resolveMissingIngredients(input: AdaptBody): string[] {
+  if (input.missingIngredients?.length) {
+    return input.missingIngredients.map((item) => item.trim()).filter(Boolean)
+  }
+  if (input.missingIngredient?.trim()) {
+    return [input.missingIngredient.trim()]
+  }
+  return []
+}
 
+export function buildAdaptUserPrompt(input: AdaptBody): string {
+  const missing = resolveMissingIngredients(input)
+  return `The cook is missing these ingredients from the recipe "${input.recipeTitle}": ${missing.join(', ') || 'None'}.
+Base meal on the table: ${input.baseMeal?.trim() || 'UNSPECIFIED'}
+Original steps: ${JSON.stringify(input.steps)}
+
+Rewrite the recipe steps so it still works without the missing ingredients.
+Use practical Indian home-kitchen substitutions from any region when helpful.
 Return STRICT JSON:
 {
-  "substitutionNote": "Short practical swap for a Telangana home kitchen.",
+  "substitutionNote": "Short practical note about what changed.",
   "updatedSteps": ["..."]
 }`
 }
@@ -204,9 +222,14 @@ export async function generateRecipesFromLlm(
 }
 
 export async function adaptRecipeFromLlm(body: AdaptBody, env?: NodeJS.ProcessEnv) {
+  const missing = resolveMissingIngredients(body)
+  if (!missing.length) {
+    throw new Error('No missing ingredients provided')
+  }
+
   const json = (await chatCompletionJson({
     system:
-      'You adapt Telangana home recipes when an ingredient is missing. Return STRICT JSON only.',
+      'You adapt Indian home recipes when ingredients are missing. Return STRICT JSON only.',
     user: buildAdaptUserPrompt(body),
     env,
   })) as { substitutionNote?: string; updatedSteps?: string[] }

@@ -1,5 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adaptRecipeFromLlm, type AdaptBody } from '../server/llm.js'
+import {
+  adaptRecipeFromLlm,
+  resolveMissingIngredients,
+  type AdaptBody,
+} from '../server/llm.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -9,10 +13,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const body = req.body as AdaptBody
-    if (!body?.recipeTitle || !body?.missingIngredient || !body?.steps) {
+    const missing = resolveMissingIngredients(body || {})
+    if (!body?.recipeTitle || !body?.steps || missing.length === 0) {
       return res.status(400).json({ error: 'Invalid body' })
     }
-    const result = await adaptRecipeFromLlm(body)
+    const result = await adaptRecipeFromLlm({
+      ...body,
+      missingIngredients: missing,
+    })
     return res.status(200).json({ ...result, source: 'llm' })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
