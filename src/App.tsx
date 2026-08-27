@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppHeader } from './components/AppHeader'
 import { ScreenTransition } from './components/ScreenTransition'
 import { bumpRecentBaseMeal, logCookedMeal } from './db'
@@ -46,10 +46,56 @@ function withOriginalSteps(recipes: Recipe[]): Recipe[] {
   }))
 }
 
+function prefetchKey(
+  baseMeal: string,
+  proteins: string[],
+  servings: number,
+): string {
+  return JSON.stringify({
+    baseMeal: baseMeal.trim(),
+    proteins: [...proteins].sort(),
+    servings,
+  })
+}
+
+async function loadRecipeContext(
+  baseMeal: string,
+  selectedProteins: string[],
+  servings: number,
+) {
+  const [suppressed, weekLogs] = await Promise.all([
+    getSuppressedProteins(),
+    getRollingWeekLogs(),
+  ])
+  const ranked = rankProteinsForSuggestion(selectedProteins, weekLogs)
+  const recentHistory = [...weekLogs]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .filter((l) => l.category !== 'NONE')
+    .slice(0, 5)
+    .map((l) => ({
+      date: l.date,
+      proteinItem: l.proteinItem,
+      category: l.category,
+      baseMeal: l.baseMeal,
+    }))
+
+  return {
+    baseMeal: baseMeal.trim(),
+    availableProteins: ranked,
+    servings,
+    suppressedProteins: suppressed,
+    recentHistory,
+  }
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(INITIAL)
   const [usedMock, setUsedMock] = useState(false)
   const [isAdapting, setIsAdapting] = useState(false)
+  const prefetchRef = useRef<{
+    key: string
+    promise: Promise<{ recipes: Recipe[]; usedMock: boolean }>
+  } | null>(null)
 
   const goTo = useCallback((step: ScreenStep) => {
     setState((prev) => ({
@@ -67,6 +113,37 @@ export default function App() {
       currentStep: 'BASE_MEAL',
       previousStep: 'BASE_MEAL',
     }))
+
+  // Prefetch recipes while mom reviews servings so Generate feels instant.
+  useEffect(() => {
+    if (state.currentStep !== 'SERVINGS_REVIEW') return
+    if (state.selectedProteins.length === 0) return
+
+    const key = prefetchKey(
+      state.baseMeal,
+      state.selectedProteins,
+      state.servings,
+    )
+    if (prefetchRef.current?.key === key) return
+
+    const promise = loadRecipeContext(
+      state.baseMeal,
+      state.selectedProteins,
+      state.servings,
+    ).then((input) => generateRecipes(input))
+
+    prefetchRef.current = { key, promise }
+    void promise.catch(() => {
+      if (prefetchRef.current?.key === key) {
+        prefetchRef.current = null
+      }
+    })
+  }, [
+    state.currentStep,
+    state.baseMeal,
+    state.selectedProteins,
+    state.servings,
+  ])
 
   const handleBack = () => {
     setState((prev) => {
@@ -106,38 +183,27 @@ export default function App() {
     }))
 
     const meals = parseBaseMeals(state.baseMeal)
-    for (const meal of meals) {
-      await bumpRecentBaseMeal(meal)
-    }
+    await Promise.all(meals.map((meal) => bumpRecentBaseMeal(meal)))
 
-    const [suppressed, weekLogs] = await Promise.all([
-      getSuppressedProteins(),
-      getRollingWeekLogs(),
-    ])
-    const ranked = rankProteinsForSuggestion(
+    const key = prefetchKey(
+      state.baseMeal,
       state.selectedProteins,
-      weekLogs,
+      state.servings,
     )
 
-    const recentHistory = [...weekLogs]
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .filter((l) => l.category !== 'NONE')
-      .slice(0, 14)
-      .map((l) => ({
-        date: l.date,
-        proteinItem: l.proteinItem,
-        category: l.category,
-        baseMeal: l.baseMeal,
-      }))
-
     try {
-      const result = await generateRecipes({
-        baseMeal: state.baseMeal.trim(),
-        availableProteins: ranked,
-        servings: state.servings,
-        suppressedProteins: suppressed,
-        recentHistory,
-      })
+      let result: { recipes: Recipe[]; usedMock: boolean }
+      if (prefetchRef.current?.key === key) {
+        result = await prefetchRef.current.promise
+      } else {
+        const input = await loadRecipeContext(
+          state.baseMeal,
+          state.selectedProteins,
+          state.servings,
+        )
+        result = await generateRecipes(input)
+      }
+
       setUsedMock(result.usedMock)
       const recipes = withOriginalSteps(result.recipes)
       setState((prev) => ({
@@ -246,8 +312,7 @@ export default function App() {
     goTo('CALENDAR')
   }
 
-  const showFlowHeader =
-    state.currentStep !== 'SETTINGS'
+  const showFlowHeader = state.currentStep !== 'SETTINGS'
   const showBack =
     state.currentStep === 'PROTEIN_SELECT' ||
     state.currentStep === 'SERVINGS_REVIEW' ||

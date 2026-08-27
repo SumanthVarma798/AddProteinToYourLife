@@ -35,68 +35,35 @@ export interface GenerateBody {
 
 export interface AdaptBody {
   recipeTitle: string
-  /** Preferred: all missing ingredients selected by the cook. */
   missingIngredients?: string[]
-  /** Legacy single-ingredient field. */
   missingIngredient?: string
   steps: string[]
   baseMeal?: string
 }
 
-export const RECIPE_SYSTEM_PROMPT = `You are an expert Indian home-cooking assistant specializing in high-protein meal pairings for elderly cooks.
-Return STRICT JSON only. No markdown fences. No commentary outside JSON.
+/** Compact schema kept in the user prompt once to cut tokens. */
+const RECIPE_JSON_HINT = `JSON:{"recipes":[{"id":"r1","title":"","prepTimeMinutes":0,"proteinPerServingGrams":0,"category":"VEG|NON_VEG|FISH","baseIngredients":[{"item":"","amountPerServing":0,"unit":"","isProteinSource":true}],"steps":["..."],"flavorComplementNote":""}]}`
 
-Rules:
-- Base meals are often South Indian (pappu, pulusu, fry curry, rice plates), but protein side dishes may come from ANY region of India (North, South, East, West, coastal, etc.) when they pair well.
-- Recipes must complement the given base meal.
-- Use ONLY proteins from the available kitchen list when possible.
-- Avoid suppressed proteins and avoid repeating the same protein from recent history when alternatives exist.
-- Steps must be short, clear, and large-print friendly (simple verbs, no jargon).
-- Prefer common Indian home-kitchen techniques and seasonings.
-- Scale ingredient amounts as per-serving values.
-
-OUTPUT FORMAT:
-{
-  "recipes": [
-    {
-      "id": "recipe_1",
-      "title": "Egg Pepper Roast",
-      "prepTimeMinutes": 15,
-      "proteinPerServingGrams": 18,
-      "category": "NON_VEG",
-      "baseIngredients": [
-        { "item": "Eggs", "amountPerServing": 2, "unit": "whole", "isProteinSource": true }
-      ],
-      "steps": ["Step one.", "Step two."],
-      "flavorComplementNote": "Pairs well with rice and the given base meal."
-    }
-  ]
-}`
+export const RECIPE_SYSTEM_PROMPT = `Indian home-cook assistant for high-protein sides. Return STRICT JSON only.
+Rules: pair with the base meal; use available proteins; avoid suppressed/recent repeats; any Indian region OK; max 4 short steps; max 6 ingredients per recipe.`
 
 export function buildGenerateUserPrompt(input: GenerateBody): string {
-  const historyLines =
+  const history =
     input.recentHistory && input.recentHistory.length > 0
       ? input.recentHistory
-          .map((h) => {
-            const base = h.baseMeal ? ` with ${h.baseMeal}` : ''
-            return `- ${h.date}: ${h.proteinItem} (${h.category})${base}`
-          })
-          .join('\n')
-      : '- None logged yet'
+          .slice(0, 5)
+          .map((h) => `${h.date}:${h.proteinItem}`)
+          .join(', ')
+      : 'none'
 
-  return `CONTEXT FOR TODAY'S SUGGESTIONS:
-- Today's base meal already cooked (often South Indian): ${input.baseMeal?.trim() || 'UNSPECIFIED'}
-- Proteins available in the kitchen now: ${input.availableProteins.join(', ') || 'UNSPECIFIED'}
-- Number of servings: ${input.servings}
-- Proteins to suppress (cooked heavily in last 2 days): ${input.suppressedProteins.join(', ') || 'None'}
-- Recent protein history (newest first):
-${historyLines}
+  return `Base meal: ${input.baseMeal?.trim() || 'UNSPECIFIED'}
+Proteins: ${input.availableProteins.join(', ') || 'UNSPECIFIED'}
+Servings: ${input.servings}
+Suppress: ${input.suppressedProteins.join(', ') || 'none'}
+Recent: ${history}
 
-TASK:
-Suggest 2-4 DISTINCT high-protein Indian side dishes that pair specifically with today's base meal.
-Sides may be from any Indian region; they do not need to be South Indian style.
-Vary categories when possible. Prefer proteins not seen recently in history.
-Return STRICT JSON matching the schema.`
+Return exactly 2 distinct high-protein Indian sides for this base meal.
+${RECIPE_JSON_HINT}`
 }
 
 export function resolveMissingIngredients(input: AdaptBody): string[] {
@@ -111,17 +78,12 @@ export function resolveMissingIngredients(input: AdaptBody): string[] {
 
 export function buildAdaptUserPrompt(input: AdaptBody): string {
   const missing = resolveMissingIngredients(input)
-  return `The cook is missing these ingredients from the recipe "${input.recipeTitle}": ${missing.join(', ') || 'None'}.
-Base meal on the table: ${input.baseMeal?.trim() || 'UNSPECIFIED'}
-Original steps: ${JSON.stringify(input.steps)}
+  return `Recipe: ${input.recipeTitle}
+Missing: ${missing.join(', ')}
+Base meal: ${input.baseMeal?.trim() || 'UNSPECIFIED'}
+Steps: ${JSON.stringify(input.steps)}
 
-Rewrite the recipe steps so it still works without the missing ingredients.
-Use practical Indian home-kitchen substitutions from any region when helpful.
-Return STRICT JSON:
-{
-  "substitutionNote": "Short practical note about what changed.",
-  "updatedSteps": ["..."]
-}`
+Rewrite steps without missing items. JSON:{"substitutionNote":"","updatedSteps":["..."]}`
 }
 
 export function extractJson(text: string): unknown {
@@ -150,9 +112,10 @@ export function resolveLlmConfig(env: NodeJS.ProcessEnv = process.env) {
     ''
 
   const customBase = env.LLM_API_BASE_URL || ''
+  // flash-lite is ~5-6x faster than gemini-3.6-flash for this workload
   const model =
     env.LLM_MODEL ||
-    (provider === 'gemini' ? 'gemini-3.6-flash' : 'gpt-4o-mini')
+    (provider === 'gemini' ? 'gemini-flash-lite-latest' : 'gpt-4o-mini')
 
   let endpoint = 'https://api.openai.com/v1/chat/completions'
   if (provider === 'gemini') {
@@ -165,25 +128,62 @@ export function resolveLlmConfig(env: NodeJS.ProcessEnv = process.env) {
   return { provider, apiKey, model, endpoint }
 }
 
-export async function chatCompletionJson(options: {
+async function geminiNativeJson(options: {
   system: string
   user: string
-  env?: NodeJS.ProcessEnv
+  apiKey: string
+  model: string
+  maxOutputTokens: number
 }): Promise<unknown> {
-  const { apiKey, model, endpoint } = resolveLlmConfig(options.env)
-  if (!apiKey) {
-    throw new Error('NO_API_KEY')
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(options.model)}:generateContent?key=${encodeURIComponent(options.apiKey)}`
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: options.system }] },
+      contents: [{ role: 'user', parts: [{ text: options.user }] }],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: options.maxOutputTokens,
+        responseMimeType: 'application/json',
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    const detail = await response.text()
+    throw new Error(`API error ${response.status}: ${detail.slice(0, 240)}`)
   }
 
-  const response = await fetch(endpoint, {
+  const data = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+  }
+  const content = data.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || '')
+    .join('')
+  if (!content) throw new Error('Empty model response')
+  return extractJson(content)
+}
+
+async function openAiCompatJson(options: {
+  system: string
+  user: string
+  apiKey: string
+  model: string
+  endpoint: string
+  maxOutputTokens: number
+}): Promise<unknown> {
+  const response = await fetch(options.endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${options.apiKey}`,
     },
     body: JSON.stringify({
-      model,
-      temperature: 0.5,
+      model: options.model,
+      temperature: 0.3,
+      max_tokens: options.maxOutputTokens,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: options.system },
@@ -205,6 +205,39 @@ export async function chatCompletionJson(options: {
   return extractJson(content)
 }
 
+export async function chatCompletionJson(options: {
+  system: string
+  user: string
+  env?: NodeJS.ProcessEnv
+  maxOutputTokens?: number
+}): Promise<unknown> {
+  const { provider, apiKey, model, endpoint } = resolveLlmConfig(options.env)
+  if (!apiKey) {
+    throw new Error('NO_API_KEY')
+  }
+
+  const maxOutputTokens = options.maxOutputTokens ?? 900
+
+  if (provider === 'gemini') {
+    return geminiNativeJson({
+      system: options.system,
+      user: options.user,
+      apiKey,
+      model,
+      maxOutputTokens,
+    })
+  }
+
+  return openAiCompatJson({
+    system: options.system,
+    user: options.user,
+    apiKey,
+    model,
+    endpoint,
+    maxOutputTokens,
+  })
+}
+
 export async function generateRecipesFromLlm(
   body: GenerateBody,
   env?: NodeJS.ProcessEnv,
@@ -213,15 +246,19 @@ export async function generateRecipesFromLlm(
     system: RECIPE_SYSTEM_PROMPT,
     user: buildGenerateUserPrompt(body),
     env,
+    maxOutputTokens: 900,
   })) as { recipes?: Recipe[] }
 
   if (!json.recipes?.length) {
     throw new Error('No recipes in response')
   }
-  return json.recipes
+  return json.recipes.slice(0, 2)
 }
 
-export async function adaptRecipeFromLlm(body: AdaptBody, env?: NodeJS.ProcessEnv) {
+export async function adaptRecipeFromLlm(
+  body: AdaptBody,
+  env?: NodeJS.ProcessEnv,
+) {
   const missing = resolveMissingIngredients(body)
   if (!missing.length) {
     throw new Error('No missing ingredients provided')
@@ -229,9 +266,10 @@ export async function adaptRecipeFromLlm(body: AdaptBody, env?: NodeJS.ProcessEn
 
   const json = (await chatCompletionJson({
     system:
-      'You adapt Indian home recipes when ingredients are missing. Return STRICT JSON only.',
+      'Adapt Indian home recipes when ingredients are missing. STRICT JSON only.',
     user: buildAdaptUserPrompt(body),
     env,
+    maxOutputTokens: 500,
   })) as { substitutionNote?: string; updatedSteps?: string[] }
 
   if (!json.substitutionNote || !json.updatedSteps?.length) {
