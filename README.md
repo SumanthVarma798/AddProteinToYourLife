@@ -8,18 +8,27 @@ Elderly-friendly, local-first Progressive Web App that helps South Indian famili
 - Top-right calendar access (Instagram DM-style)
 - Vertically scrollable protein history with fixed Home button
 - Dexie.js / IndexedDB offline storage
-- Built-in starter recipes when no API key is set
-- Optional OpenAI / Gemini / custom OpenAI-compatible recipe generation
+- Dynamic Gemini recipes using base meal + selected proteins + cooking history
+- Server-side API key (`.env` / Vercel env) so Mom never types a key on her phone
+- Offline starter recipes if the API is unavailable
 - Large 56px touch targets and high-contrast Telangana Emerald palette
 
 ## Quick start
 
 ```bash
+cp .env.example .env
+# put GEMINI_API_KEY=... in .env
 npm install
 npm run dev
 ```
 
 Open the local URL Vite prints (usually `http://localhost:5173`).
+
+## Secrets
+
+- `GEMINI_API_KEY` lives in `.env` locally and in Vercel Project Env vars in production.
+- The phone app calls `/api/recipes` and `/api/adapt`; the key never ships in the client bundle.
+- Optional Settings override exists only as a personal backup.
 
 ## Build & preview
 
@@ -30,10 +39,10 @@ npm run preview
 
 ## Install on iPhone
 
-1. Deploy to Vercel (or any static host).
+1. Deploy to Vercel.
 2. Open the site in Safari.
 3. Share → Add to Home Screen → name it **Add Protein**.
-4. Open Settings in the app and paste an API key if you want AI recipes.
+4. Use the app; Gemini runs through the server automatically.
 
 ## Stack
 
@@ -41,6 +50,7 @@ npm run preview
 - Tailwind CSS v4
 - Dexie.js
 - vite-plugin-pwa
+- Vercel serverless `/api/*` (Gemini proxy)
 - anime.js (screen enter + button press)
 - Phosphor Icons
 

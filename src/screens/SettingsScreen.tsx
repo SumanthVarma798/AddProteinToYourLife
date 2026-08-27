@@ -8,7 +8,7 @@ type Props = {
 }
 
 export function SettingsScreen({ onClose }: Props) {
-  const [provider, setProvider] = useState<LlmProvider>('openai')
+  const [provider, setProvider] = useState<LlmProvider>('gemini')
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [model, setModel] = useState('')
@@ -16,7 +16,7 @@ export function SettingsScreen({ onClose }: Props) {
 
   useEffect(() => {
     void (async () => {
-      setProvider(((await getSetting('LLM_PROVIDER')) as LlmProvider) || 'openai')
+      setProvider(((await getSetting('LLM_PROVIDER')) as LlmProvider) || 'gemini')
       setApiKey((await getSetting('API_KEY')) || '')
       setBaseUrl((await getSetting('API_BASE_URL')) || '')
       setModel((await getSetting('LLM_MODEL')) || '')
@@ -37,31 +37,36 @@ export function SettingsScreen({ onClose }: Props) {
       <div>
         <h1 className="text-2xl font-bold text-ink">Settings</h1>
         <p className="mt-1 text-base text-muted">
-          API key stays on this phone in local storage. Leave blank to use
-          built-in starter recipes.
+          Recipes use the family Gemini key on the server by default, so Mom
+          does not need to type anything. Optional personal key below is only a
+          backup override on this device.
         </p>
       </div>
 
       <label className="block text-left">
-        <span className="mb-2 block text-sm font-semibold">Provider</span>
+        <span className="mb-2 block text-sm font-semibold">
+          Backup provider override
+        </span>
         <select
           value={provider}
           onChange={(e) => setProvider(e.target.value as LlmProvider)}
           className="touch-target w-full rounded-xl border-2 border-border bg-surface px-3 text-base"
         >
+          <option value="gemini">Gemini (default)</option>
           <option value="openai">OpenAI</option>
-          <option value="gemini">Gemini (OpenAI-compatible)</option>
           <option value="custom">Custom OpenAI-compatible URL</option>
         </select>
       </label>
 
       <label className="block text-left">
-        <span className="mb-2 block text-sm font-semibold">API key</span>
+        <span className="mb-2 block text-sm font-semibold">
+          Personal API key (optional)
+        </span>
         <input
           type="password"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder="sk-... or Gemini key"
+          placeholder="Leave blank to use server key"
           className="touch-target w-full rounded-xl border-2 border-border bg-surface px-3 text-base"
           autoComplete="off"
         />

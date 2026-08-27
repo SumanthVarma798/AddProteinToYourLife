@@ -48,8 +48,8 @@ export function RecipeResultsScreen({
     <div className="flex flex-1 flex-col gap-4 px-4 py-5">
       {usedMockHint ? (
         <p className="rounded-xl bg-primary/10 px-3 py-2 text-sm font-medium text-primary">
-          Showing kitchen-tested starter recipes. Add an API key in Settings for
-          fresh AI suggestions.
+          Showing starter recipes offline. Live Gemini suggestions appear when
+          the server API key is configured.
         </p>
       ) : null}
       {error ? (

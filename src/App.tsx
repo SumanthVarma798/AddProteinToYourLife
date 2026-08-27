@@ -107,12 +107,24 @@ export default function App() {
       weekLogs,
     )
 
+    const recentHistory = [...weekLogs]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .filter((l) => l.category !== 'NONE')
+      .slice(0, 14)
+      .map((l) => ({
+        date: l.date,
+        proteinItem: l.proteinItem,
+        category: l.category,
+        baseMeal: l.baseMeal,
+      }))
+
     try {
       const result = await generateRecipes({
         baseMeal: state.baseMeal.trim(),
         availableProteins: ranked,
         servings: state.servings,
         suppressedProteins: suppressed,
+        recentHistory,
       })
       setUsedMock(result.usedMock)
       setState((prev) => ({
@@ -157,6 +169,7 @@ export default function App() {
         recipeTitle: recipe.title,
         missingIngredient: ingredientItem,
         steps: recipe.steps,
+        baseMeal: state.baseMeal.trim(),
       })
       nextRecipe = {
         ...nextRecipe,
